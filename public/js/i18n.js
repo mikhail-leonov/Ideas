@@ -1,4 +1,6 @@
-/* js/i18n.js — minimal i18n engine. Must load BEFORE the lng/*.js packs and app.js. */
+/* js/i18n.js — minimal i18n engine. Must load BEFORE the lng/*.js packs and app.js.
+   NOTE: this is the ONLY place the engine may be defined. Defining it again in
+   app.js would create a new FT.I18n with empty packs and lose every language. */
 window.FT = window.FT || {};
 (function (FT) {
   "use strict";
@@ -11,24 +13,36 @@ window.FT = window.FT || {};
     packs[code] = data || { strings: {} };
   }
 
+  /* Interpolate {placeholders}. The replacement is done through a function so
+     that values containing "$&", "$1", "$'" etc. are inserted literally. */
+  function interpolate(str, vars) {
+    if (!vars) return str;
+    Object.keys(vars).forEach(function (k) {
+      str = str.replace(new RegExp("\\{" + k + "\\}", "g"), function () {
+        return vars[k];
+      });
+    });
+    return str;
+  }
+
   function t(key, vars) {
     var pack = packs[currentLang] || packs.en || { strings: {} };
     var fallback = packs.en || { strings: {} };
     var str = (pack.strings && pack.strings[key]) || (fallback.strings && fallback.strings[key]) || key;
-    if (vars) {
-      Object.keys(vars).forEach(function (k) {
-        str = str.replace(new RegExp("\\{" + k + "\\}", "g"), vars[k]);
-      });
-    }
-    return str;
+    return interpolate(str, vars);
   }
 
   function applyToDom(root) {
     var scope = root || document;
     document.documentElement.lang = currentLang;
     document.documentElement.dir = (packs[currentLang] && packs[currentLang].dir) || "ltr";
+
     scope.querySelectorAll("[data-i18n]").forEach(function (el) {
       el.textContent = t(el.getAttribute("data-i18n"));
+    });
+    /* Trusted packs only — used for strings that intentionally contain markup. */
+    scope.querySelectorAll("[data-i18n-html]").forEach(function (el) {
+      el.innerHTML = t(el.getAttribute("data-i18n-html"));
     });
     scope.querySelectorAll("[data-i18n-placeholder]").forEach(function (el) {
       el.setAttribute("placeholder", t(el.getAttribute("data-i18n-placeholder")));

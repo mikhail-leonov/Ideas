@@ -26,6 +26,7 @@
       "menu.help.shortcuts": "Keyboard Shortcuts",
       "toolbar.searchPlaceholder": "Search nodes…",
       "toolbar.editTitle": "Edit map title",
+      "toolbar.language": "Language",
       "connect.bannerSelectFirst": "Connect mode: click the first node (Esc to cancel)",
       "connect.bannerSelectSecond": "Connect mode: now click the second node (Esc to cancel)",
       "connect.duplicate": "Those nodes are already connected.",

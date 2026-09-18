@@ -27,6 +27,7 @@
       "menu.help.shortcuts": "Горячие клавиши",
       "toolbar.searchPlaceholder": "Поиск узлов…",
       "toolbar.editTitle": "Изменить название карты",
+      "toolbar.language": "Язык",
       "connect.bannerSelectFirst": "Режим связи: выберите первый узел (Esc — отмена)",
       "connect.bannerSelectSecond": "Режим связи: теперь выберите второй узел (Esc — отмена)",
       "connect.duplicate": "Эти узлы уже соединены.",

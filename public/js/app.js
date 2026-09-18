@@ -1,53 +1,8 @@
-/* ===================== i18n engine ===================== */
-window.FT = window.FT || {};
-(function (FT) {
-  "use strict";
-  var packs = {}, currentLang = "en", listeners = [];
-  function register(code, data) { packs[code] = data || { strings: {} }; }
-  function t(key, vars) {
-    var pack = packs[currentLang] || packs.en || { strings: {} };
-    var fallback = packs.en || { strings: {} };
-    var str = (pack.strings && pack.strings[key]) || (fallback.strings && fallback.strings[key]) || key;
-    if (vars) Object.keys(vars).forEach(function (k) {
-      str = str.replace(new RegExp("\\{" + k + "\\}", "g"), vars[k]);
-    });
-    return str;
-  }
-  function applyToDom(root) {
-    var scope = root || document;
-    document.documentElement.lang = currentLang;
-    document.documentElement.dir = (packs[currentLang] && packs[currentLang].dir) || "ltr";
-    scope.querySelectorAll("[data-i18n]").forEach(function (el) { el.textContent = t(el.getAttribute("data-i18n")); });
-    scope.querySelectorAll("[data-i18n-placeholder]").forEach(function (el) { el.setAttribute("placeholder", t(el.getAttribute("data-i18n-placeholder"))); });
-    scope.querySelectorAll("[data-i18n-title]").forEach(function (el) { el.setAttribute("title", t(el.getAttribute("data-i18n-title"))); });
-  }
-  function setLang(code) {
-    if (!packs[code]) return;
-    currentLang = code;
-    try { localStorage.setItem("ft_lang", code); } catch (e) {}
-    applyToDom();
-    listeners.forEach(function (fn) { fn(code); });
-  }
-  function init() {
-    var saved = null;
-    try { saved = localStorage.getItem("ft_lang"); } catch (e) {}
-    if (saved && packs[saved]) currentLang = saved;
-    else {
-      var nav = ((navigator.language || "en").split("-")[0] || "en").toLowerCase();
-      if (packs[nav]) currentLang = nav;
-    }
-    applyToDom();
-  }
-  function availableLanguages() {
-    return Object.keys(packs).map(function (code) {
-      return { code: code, name: packs[code].name, nativeName: packs[code].nativeName };
-    });
-  }
-  function onChange(fn) { listeners.push(fn); }
-  FT.I18n = { register: register, t: t, setLang: setLang, init: init, applyToDom: applyToDom, availableLanguages: availableLanguages, onChange: onChange, getCurrentLang: function () { return currentLang; } };
-})(window.FT);
-
-
+/* public/js/app.js
+   Depends on: i18n.js + lng/*.js packs (loaded first), Cytoscape, Bootstrap.
+   IMPORTANT: the i18n engine lives in public/js/i18n.js only. Do not define
+   FT.I18n here — doing so replaces the engine after the language packs have
+   registered into it and every translation is lost. */
 window.FT = window.FT || {};
 (function (FT) {
 "use strict";
@@ -65,7 +20,10 @@ function edgeKey(a, b) { return a + "|" + b; }
 function connectionExists(a, b) { return data.connections.some(function (c) { return (c.source === a && c.target === b) || (c.source === b && c.target === a); }); }
 function markDirty() { dirty = true; updateTitleBar(); }
 function clearDirty() { dirty = false; updateTitleBar(); }
-function updateTitleBar() { els.mapTitleDisplay.textContent = data.title + (dirty ? " *" : ""); }
+function updateTitleBar() {
+  if (!els.mapTitleDisplay || !data) return;
+  els.mapTitleDisplay.textContent = data.title + (dirty ? " *" : "");
+}
 
 function nodeLabel(n) {
   var lines = [n.title || FT.I18n.t("app.newNodeTitle")];
@@ -117,9 +75,11 @@ function initCytoscape() {
   cy.on("cxttap", "edge", function (evt) { evt.originalEvent.preventDefault(); var e = evt.target; selectEdge(e.data("source"), e.data("target")); showContextMenu(evt.originalEvent, "edge", edgeKey(e.data("source"), e.data("target"))); });
   cy.on("cxttap", function (evt) {
     if (evt.target === cy) {
-      evt.originalEvent.preventDefault();
-      var pos = evt.renderedPosition || { x: evt.originalEvent.clientX, y: evt.originalEvent.clientY };
-      showContextMenu({ clientX: pos.x, clientY: pos.y, _canvasPos: evt.position }, "canvas");
+      var oe = evt.originalEvent;
+      oe.preventDefault();
+      /* The menu is position:fixed, so it must use viewport coordinates.
+         evt.position (model coords) is kept separately for "add node here". */
+      showContextMenu({ clientX: oe.clientX, clientY: oe.clientY, _canvasPos: evt.position }, "canvas");
     }
   });
   els.cyContainer.addEventListener("contextmenu", function (e) { e.preventDefault(); });
@@ -483,12 +443,13 @@ function saveJson() {
 
 /* ===== Search ===== */
 function runSearch(term) {
+  if (!cy) return;
   cy.nodes().removeClass("search-highlight");
-  term = term.trim().toLowerCase();
+  term = (term || "").trim().toLowerCase();
   els.searchResults.innerHTML = ""; els.searchResults.classList.add("d-none");
   if (!term) return;
   var matches = data.nodes.filter(function (n) { return (n.title || "").toLowerCase().indexOf(term) !== -1 || (n.description || "").toLowerCase().indexOf(term) !== -1; });
-  matches.forEach(function (n) { cy.getElementById(n.id).addClass("search-highlight"); });
+  matches.forEach(function (n) { var ele = cy.getElementById(n.id); if (ele && ele.length) ele.addClass("search-highlight"); });
   if (!matches.length) return;
   els.searchResults.classList.remove("d-none");
   matches.slice(0, 20).forEach(function (n) {
@@ -515,7 +476,7 @@ function openMapTitleEdit() { els.mapTitleInput.value = data.title || ""; els.ma
 function submitMapTitle() { var t = els.mapTitleInput.value.trim(); if (t) { data.title = t; markDirty(); updateTitleBar(); } els.mapTitleModal.hide(); }
 
 /* ===== Help ===== */
-function showHelp() { var m = new bootstrap.Modal(document.getElementById("helpModal")); m.show(); }
+function showHelp() { els.helpModal.show(); }
 
 /* ===== Keyboard shortcuts ===== */
 function isTypingTarget(el) { return el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable); }
@@ -542,7 +503,7 @@ function bindShortcuts() {
     if (lower === "c") { toggleConnectMode(); return; }
     if (lower === "l") { runLayout(true); cy.fit(undefined, 40); return; }
     if (lower === "t") { openMapTitleEdit(); return; }
-    if (k === "/" ) { e.preventDefault(); els.searchInput.focus(); return; }
+    if (k === "/") { e.preventDefault(); els.searchInput.focus(); return; }
     if (k === "?" || k === "F1") { e.preventDefault(); showHelp(); return; }
   });
 }
@@ -607,6 +568,8 @@ function cacheEls() {
   els.largeAttBody = document.getElementById("largeAttBody");
   els.btnEmbedLarge = document.getElementById("btnEmbedLarge");
   els.btnMetadataOnlyLarge = document.getElementById("btnMetadataOnlyLarge");
+  /* Cached once — creating a Modal on every show() leaks instances/listeners. */
+  els.helpModal = new bootstrap.Modal(document.getElementById("helpModal"));
 }
 function bindEvents() {
   els.btnConfirmNewMap.addEventListener("click", doNewMap);
@@ -633,6 +596,13 @@ function bindEvents() {
     if (!els.ctxMenu.contains(e.target)) hideContextMenu();
   });
   window.addEventListener("resize", function () { if (cy) cy.resize(); });
+  /* Warn before leaving with unsaved changes. */
+  window.addEventListener("beforeunload", function (e) {
+    if (!dirty) return;
+    e.preventDefault();
+    e.returnValue = "";
+    return "";
+  });
 }
 function buildLangMenu() {
   els.langMenu.innerHTML = "";
