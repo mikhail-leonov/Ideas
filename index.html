@@ -1,34 +1,274 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Empty</title>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title data-i18n="app.title">Mind Map</title>
         <link rel="stylesheet" href="public/css/bootstrap/bootstrap.min.css">
         <link rel="stylesheet" href="public/fonts/common/fraunces.css">
         <link rel="stylesheet" href="public/icons/common/bootstrap-icons.css">
         <link rel="stylesheet" href="public/css/app.css">
-    </head>
-    <body>
+</head>
+<body class="d-flex flex-column vh-100">
 
-        <main>
-            <h1 class="visually-hidden">Heroes examples</h1>
-            <div class="px-4 py-5 my-5 text-center">
-                <h1 class="display-5 fw-bold">Centered hero</h1>
-                <div class="col-lg-6 mx-auto">
-                    <p class="lead mb-4">Quickly design and customize responsive mobile-first sites with Bootstrap, the world’s most popular front-end open source toolkit, featuring Sass variables and mixins, responsive grid system, extensive prebuilt components, and powerful JavaScript plugins.</p>
-                    <div class="d-grid gap-2 d-sm-flex justify-content-sm-center">
-                        <button type="button" class="btn btn-primary btn-lg px-4 gap-3">Primary button</button>
-                        <button type="button" class="btn btn-outline-secondary btn-lg px-4">Secondary</button>
-                    </div>
-                </div>
-            </div>
-        </main>
-        
-        <script src="public/js/bootstrap/bootstrap.min.js"></script>
+<nav class="navbar navbar-dark bg-dark px-2 py-1 flex-shrink-0">
+  <div class="container-fluid d-flex flex-wrap align-items-center gap-2">
+    <span class="navbar-brand mb-0 h1 me-2" style="font-size:1rem;" data-i18n="app.title">Mind Map</span>
+
+    <!-- File -->
+    <div class="dropdown">
+      <button class="btn btn-sm btn-outline-light dropdown-toggle" data-bs-toggle="dropdown" data-i18n="menu.file">File</button>
+      <ul class="dropdown-menu dropdown-menu-dark">
+        <li><button class="dropdown-item" data-action="newMap"><span data-i18n="menu.file.new">New Map</span><span class="shortcut">Ctrl+N</span></button></li>
+        <li><button class="dropdown-item" data-action="openJson"><span data-i18n="menu.file.open">Open JSON…</span><span class="shortcut">Ctrl+O</span></button></li>
+        <li><button class="dropdown-item" data-action="saveJson"><span data-i18n="menu.file.save">Save JSON</span><span class="shortcut">Ctrl+S</span></button></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><button class="dropdown-item" data-action="editMapTitle"><span data-i18n="menu.file.editTitle">Edit Map Title…</span><span class="shortcut">T</span></button></li>
+      </ul>
+    </div>
+
+    <!-- Edit -->
+    <div class="dropdown">
+      <button class="btn btn-sm btn-outline-light dropdown-toggle" data-bs-toggle="dropdown" data-i18n="menu.edit">Edit</button>
+      <ul class="dropdown-menu dropdown-menu-dark">
+        <li><button class="dropdown-item" data-action="addNode"><span data-i18n="menu.edit.addNode">Add Node</span><span class="shortcut">N</span></button></li>
+        <li><button class="dropdown-item" data-action="editNode" id="menuEditNode" disabled><span data-i18n="menu.edit.editNode">Edit Node</span><span class="shortcut">E</span></button></li>
+        <li><button class="dropdown-item" data-action="deleteNode" id="menuDeleteNode" disabled><span data-i18n="menu.edit.deleteNode">Delete Node</span><span class="shortcut">Del</span></button></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><button class="dropdown-item" data-action="connectNodes"><span data-i18n="menu.edit.connect">Connect Nodes</span><span class="shortcut">C</span></button></li>
+        <li><button class="dropdown-item" data-action="deleteConnection" id="menuDeleteConnection" disabled><span data-i18n="menu.edit.deleteConnection">Delete Connection</span><span class="shortcut">Del</span></button></li>
+      </ul>
+    </div>
+
+    <!-- View -->
+    <div class="dropdown">
+      <button class="btn btn-sm btn-outline-light dropdown-toggle" data-bs-toggle="dropdown" data-i18n="menu.view">View</button>
+      <ul class="dropdown-menu dropdown-menu-dark">
+        <li><button class="dropdown-item" data-action="fitMap"><span data-i18n="menu.view.fit">Fit Map</span><span class="shortcut">F</span></button></li>
+        <li><button class="dropdown-item" data-action="zoomIn"><span data-i18n="menu.view.zoomIn">Zoom In</span><span class="shortcut">+</span></button></li>
+        <li><button class="dropdown-item" data-action="zoomOut"><span data-i18n="menu.view.zoomOut">Zoom Out</span><span class="shortcut">−</span></button></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><button class="dropdown-item" data-action="autoLayout"><span data-i18n="menu.view.autoLayout">Auto Layout</span><span class="shortcut">L</span></button></li>
+      </ul>
+    </div>
+
+    <!-- Help -->
+    <div class="dropdown">
+      <button class="btn btn-sm btn-outline-light dropdown-toggle" data-bs-toggle="dropdown" data-i18n="menu.help">Help</button>
+      <ul class="dropdown-menu dropdown-menu-dark">
+        <li><button class="dropdown-item" data-action="showHelp"><span data-i18n="menu.help.shortcuts">Keyboard Shortcuts</span><span class="shortcut">F1</span></button></li>
+      </ul>
+    </div>
+
+    <span id="mapTitleDisplay" class="text-white-50 ms-2 small flex-grow-1"></span>
+
+    <!-- Search -->
+    <div class="position-relative" style="min-width: 220px;">
+      <input type="search" id="searchInput" class="form-control form-control-sm bg-dark text-light border-secondary" data-i18n-placeholder="toolbar.searchPlaceholder" placeholder="Search nodes…">
+      <div id="searchResults" class="list-group position-absolute w-100 shadow d-none" style="top:100%;"></div>
+    </div>
+
+    <!-- Language -->
+    <div class="dropdown">
+      <button class="btn btn-sm btn-outline-light dropdown-toggle" type="button" data-bs-toggle="dropdown" title="Language">
+        <i class="bi bi-translate"></i>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark" id="langMenu"></ul>
+    </div>
+  </div>
+</nav>
+
+<main class="flex-grow-1 overflow-hidden">
+  <div class="row g-0 h-100">
+    <div class="col-12 col-lg-8 col-xl-9 h-100 position-relative border-end" style="min-height: 320px;">
+      <div id="connectModeBanner" class="position-absolute top-0 start-50 translate-middle-x mt-2 alert alert-info py-1 px-3 d-none" style="z-index: 1000;"></div>
+      <div id="cy" class="w-100 h-100"></div>
+    </div>
+    <div class="col-12 col-lg-4 col-xl-3 h-100 overflow-auto p-3" id="sidebar">
+      <p class="text-muted" data-i18n="sidebar.emptyState">Select a node to view its details.</p>
+    </div>
+  </div>
+</main>
+
+<ul id="ctxMenu" class="ctx-menu dropdown-menu dropdown-menu-dark d-none"></ul>
+
+<!-- Add / Edit Node modal -->
+<div class="modal fade" id="nodeModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="nodeModalLabel">Add Node</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label" for="nodeTitleInput" data-i18n="modal.titleLabel">Title</label>
+          <input type="text" id="nodeTitleInput" class="form-control">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="nodeDescInput" data-i18n="modal.descriptionLabel">Description</label>
+          <textarea id="nodeDescInput" class="form-control" rows="3"></textarea>
+        </div>
+        <div class="form-check d-none" id="connectToSelectedWrap">
+          <input class="form-check-input" type="checkbox" id="connectToSelectedInput" checked>
+          <label class="form-check-label" for="connectToSelectedInput" data-i18n="modal.connectToSelected">Connect new node to selected node</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="modal.cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btnNodeModalSave" data-i18n="modal.save">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Delete node confirmation -->
+<div class="modal fade" id="deleteNodeModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" data-i18n="modal.deleteNodeTitle">Delete Node</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-0" data-i18n="modal.deleteNodeBody">This will also remove all connections to and from this node. This action cannot be undone.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="modal.cancel">Cancel</button>
+        <button type="button" class="btn btn-danger" id="btnConfirmDeleteNode" data-bs-dismiss="modal" data-i18n="modal.confirm">Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- New map confirmation -->
+<div class="modal fade" id="newMapModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" data-i18n="modal.newMapTitle">New Map</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-0" data-i18n="modal.newMapBody">You have unsaved changes. Starting a new map will discard them.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="modal.cancel">Cancel</button>
+        <button type="button" class="btn btn-danger" id="btnConfirmNewMap" data-i18n="modal.newMapConfirm">Discard and create new map</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Map title edit -->
+<div class="modal fade" id="mapTitleModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" data-i18n="toolbar.editTitle">Edit map title</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label" for="mapTitleInput" data-i18n="modal.mapTitleLabel">Map title</label>
+        <input type="text" id="mapTitleInput" class="form-control">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="modal.cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btnSaveMapTitle" data-i18n="modal.save">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Large attachment warning -->
+<div class="modal fade" id="largeAttModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" data-i18n="modal.largeAttachmentTitle">Large attachment</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="fw-semibold mb-1" id="largeAttName"></p>
+        <p class="mb-0" id="largeAttBody"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="btnMetadataOnlyLarge" data-i18n="modal.metadataOnlyBtn">Keep metadata only</button>
+        <button type="button" class="btn btn-primary" id="btnEmbedLarge" data-i18n="modal.embed">Embed file anyway</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Help modal -->
+<div class="modal fade" id="helpModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" data-i18n="help.title">How to use Mind Map</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <h6 data-i18n="help.mouseTitle">Mouse actions</h6>
+        <table class="table table-sm mb-3">
+          <tbody>
+            <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.click">Click</kbd></td><td data-i18n="help.mouse.clickDesc">Select a node or connection</td></tr>
+            <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.dblClick">Double-click canvas</kbd></td><td data-i18n="help.mouse.dblClickDesc">Add a new node</td></tr>
+            <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.dblClickNode">Double-click node</kbd></td><td data-i18n="help.mouse.dblClickNodeDesc">Edit the node</td></tr>
+            <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.rightClick">Right-click</kbd></td><td data-i18n="help.mouse.rightClickDesc">Open context menu</td></tr>
+            <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.drag">Drag node</kbd></td><td data-i18n="help.mouse.dragDesc">Move a node</td></tr>
+            <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.wheel">Mouse wheel</kbd></td><td data-i18n="help.mouse.wheelDesc">Zoom in / out</td></tr>
+            <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.dragCanvas">Drag canvas</kbd></td><td data-i18n="help.mouse.dragCanvasDesc">Pan the view</td></tr>
+          </tbody>
+        </table>
+
+        <h6 data-i18n="help.keysTitle">Keyboard shortcuts</h6>
+        <table class="table table-sm mb-3">
+          <tbody>
+            <tr><td class="text-nowrap"><kbd>Ctrl</kbd> + <kbd>N</kbd></td><td data-i18n="help.keys.new">New map</td></tr>
+            <tr><td class="text-nowrap"><kbd>Ctrl</kbd> + <kbd>O</kbd></td><td data-i18n="help.keys.open">Open JSON file</td></tr>
+            <tr><td class="text-nowrap"><kbd>Ctrl</kbd> + <kbd>S</kbd></td><td data-i18n="help.keys.save">Save JSON file</td></tr>
+            <tr><td class="text-nowrap"><kbd>N</kbd></td><td data-i18n="help.keys.addNode">Add node</td></tr>
+            <tr><td class="text-nowrap"><kbd>E</kbd></td><td data-i18n="help.keys.editNode">Edit selected node</td></tr>
+            <tr><td class="text-nowrap"><kbd>Del</kbd></td><td data-i18n="help.keys.delete">Delete selected node / connection</td></tr>
+            <tr><td class="text-nowrap"><kbd>C</kbd></td><td data-i18n="help.keys.connect">Toggle connect mode</td></tr>
+            <tr><td class="text-nowrap"><kbd>Esc</kbd></td><td data-i18n="help.keys.cancel">Cancel connect mode / close menus</td></tr>
+            <tr><td class="text-nowrap"><kbd>F</kbd></td><td data-i18n="help.keys.fit">Fit map to view</td></tr>
+            <tr><td class="text-nowrap"><kbd>+</kbd> / <kbd>−</kbd></td><td data-i18n="help.keys.zoom">Zoom in / out</td></tr>
+            <tr><td class="text-nowrap"><kbd>L</kbd></td><td data-i18n="help.keys.layout">Automatic layout</td></tr>
+            <tr><td class="text-nowrap"><kbd>T</kbd></td><td data-i18n="help.keys.title">Edit map title</td></tr>
+            <tr><td class="text-nowrap"><kbd>/</kbd></td><td data-i18n="help.keys.search">Focus search</td></tr>
+            <tr><td class="text-nowrap"><kbd>F1</kbd> / <kbd>?</kbd></td><td data-i18n="help.keys.help">Show this help</td></tr>
+          </tbody>
+        </table>
+
+        <h6 data-i18n="help.tipsTitle">Tips</h6>
+        <ul class="mb-0">
+          <li data-i18n="help.tip1">Use <b>Connect mode</b> (press <kbd>C</kbd>) then click two nodes to link them.</li>
+          <li data-i18n="help.tip2">Drag nodes freely — positions are saved with the JSON file.</li>
+          <li data-i18n="help.tip3">Right-click a node or connection for quick actions.</li>
+          <li data-i18n="help.tip4">Attachments (images, audio, video, files) are managed from the sidebar.</li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" data-bs-dismiss="modal" data-i18n="modal.close">Got it</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="alertContainer" class="toast-container position-fixed bottom-0 end-0 p-3 d-flex flex-column gap-2"></div>
+<input type="file" id="fileInputJson" accept="application/json,.json" class="d-none">
+
+        <script src="https://unpkg.com/cytoscape@3.30.1/dist/cytoscape.min.js"></script>
+        <script src="public/js/bootstrap/bootstrap.bundle.min.js"></script>
+        <script src="public/js/i18n.js"></script>
         <script src="public/js/lng/en.js"></script>
         <script src="public/js/lng/ru.js"></script>
         <script src="public/js/app.js"></script>
+ 
+<script>
+</script>
+</body>
 
-    </body>
 </html>
