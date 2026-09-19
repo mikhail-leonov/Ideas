@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Offline mind-map editor with Cytoscape, JSON import/export">
 <title data-i18n="app.title">Mind Map</title>
         <link rel="stylesheet" href="public/css/bootstrap/bootstrap.min.css">
         <link rel="stylesheet" href="public/fonts/common/fraunces.css">
@@ -82,7 +83,7 @@
   <div class="row g-0 h-100">
     <div class="col-12 col-lg-8 col-xl-9 h-100 position-relative border-end" style="min-height: 320px;">
       <div id="connectModeBanner" class="position-absolute top-0 start-50 translate-middle-x mt-2 alert alert-info py-1 px-3 d-none" style="z-index: 1000;"></div>
-      <div id="cy" class="w-100 h-100"></div>
+      <div id="cy" class="w-100 h-100" tabindex="0" aria-label="Mind map canvas"></div>
     </div>
     <div class="col-12 col-lg-4 col-xl-3 h-100 overflow-auto p-3" id="sidebar">
       <p class="text-muted" data-i18n="sidebar.emptyState">Select a node to view its details.</p>
@@ -103,18 +104,18 @@
       <div class="modal-body">
         <div class="mb-3">
           <label class="form-label" for="nodeTitleInput" data-i18n="modal.titleLabel">Title</label>
-          <input type="text" id="nodeTitleInput" class="form-control">
+          <input type="text" id="nodeTitleInput" class="form-control" maxlength="200">
         </div>
         <div class="mb-3">
           <label class="form-label" for="nodeDescInput" data-i18n="modal.descriptionLabel">Description</label>
-          <textarea id="nodeDescInput" class="form-control" rows="3"></textarea>
-          <div class="d-flex align-items-center gap-2 mt-2">
+          <textarea id="nodeDescInput" class="form-control" rows="4" maxlength="10000"></textarea>
+          <div class="d-flex justify-content-between align-items-center mt-2">
             <button type="button" class="btn btn-sm btn-outline-secondary" id="btnLoadDescFromFile" data-i18n="modal.loadFromFile">Load from file…</button>
-            <small id="descFileStatus" class="text-muted"></small>
+            <span id="descFileStatus" class="small text-muted"></span>
           </div>
         </div>
-        <div class="form-check d-none" id="connectToSelectedWrap">
-          <input class="form-check-input" type="checkbox" id="connectToSelectedInput" checked>
+        <div class="form-check mb-2 d-none" id="connectToSelectedWrap">
+          <input type="checkbox" class="form-check-input" id="connectToSelectedInput">
           <label class="form-check-label" for="connectToSelectedInput" data-i18n="modal.connectToSelected">Connect new node to selected node</label>
         </div>
       </div>
@@ -126,7 +127,7 @@
   </div>
 </div>
 
-<!-- Delete node confirmation -->
+<!-- Delete node confirm -->
 <div class="modal fade" id="deleteNodeModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -139,13 +140,13 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="modal.cancel">Cancel</button>
-        <button type="button" class="btn btn-danger" id="btnConfirmDeleteNode" data-bs-dismiss="modal" data-i18n="modal.confirm">Delete</button>
+        <button type="button" class="btn btn-danger" id="btnConfirmDeleteNode" data-i18n="modal.confirm">Delete</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- New map confirmation -->
+<!-- New map confirm -->
 <div class="modal fade" id="newMapModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -174,7 +175,7 @@
       </div>
       <div class="modal-body">
         <label class="form-label" for="mapTitleInput" data-i18n="modal.mapTitleLabel">Map title</label>
-        <input type="text" id="mapTitleInput" class="form-control">
+        <input type="text" id="mapTitleInput" class="form-control" maxlength="200">
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="modal.cancel">Cancel</button>
@@ -242,11 +243,11 @@
   </div>
 </div>
 
-<div id="alertContainer" class="toast-container position-fixed bottom-0 end-0 p-3 d-flex flex-column gap-2"></div>
+<div id="alertContainer" class="toast-container position-fixed bottom-0 end-0 p-3 d-flex flex-column gap-2" style="z-index: 1080;"></div>
 <input type="file" id="fileInputJson" accept="application/json,.json" class="d-none">
 <input type="file" id="fileInputDesc" class="d-none">
 
-        <script src="https://unpkg.com/cytoscape@3.30.1/dist/cytoscape.min.js"></script>
+        <script src="public/js/cytoscape/cytoscape.min.js"></script>
         <script src="public/js/bootstrap/bootstrap.bundle.min.js"></script>
         <script src="public/js/i18n.js"></script>
         <script src="public/js/lng/en.js"></script>

@@ -1,6 +1,5 @@
 /* js/i18n.js — minimal i18n engine. Must load BEFORE the lng/*.js packs and app.js.
-   NOTE: this is the ONLY place the engine may be defined. Defining it again in
-   app.js would create a new FT.I18n with empty packs and lose every language. */
+   NOTE: this is the ONLY place the engine may be defined. */
 window.FT = window.FT || {};
 (function (FT) {
   "use strict";
@@ -13,12 +12,15 @@ window.FT = window.FT || {};
     packs[code] = data || { strings: {} };
   }
 
-  /* Interpolate {placeholders}. The replacement is done through a function so
-     that values containing "$&", "$1", "$'" etc. are inserted literally. */
+  function escapeRegExp(s){
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /* Interpolate {placeholders}. Uses function replacement so values containing "$&" etc are literal. */
   function interpolate(str, vars) {
     if (!vars) return str;
     Object.keys(vars).forEach(function (k) {
-      str = str.replace(new RegExp("\\{" + k + "\\}", "g"), function () {
+      str = str.replace(new RegExp("\\{" + escapeRegExp(k) + "\\}", "g"), function () {
         return vars[k];
       });
     });
@@ -38,9 +40,9 @@ window.FT = window.FT || {};
     document.documentElement.dir = (packs[currentLang] && packs[currentLang].dir) || "ltr";
 
     scope.querySelectorAll("[data-i18n]").forEach(function (el) {
-      el.textContent = t(el.getAttribute("data-i18n"));
+      // Only overwrite if element has no child elements (safe text nodes)
+      if(el.children.length === 0) el.textContent = t(el.getAttribute("data-i18n"));
     });
-    /* Trusted packs only — used for strings that intentionally contain markup. */
     scope.querySelectorAll("[data-i18n-html]").forEach(function (el) {
       el.innerHTML = t(el.getAttribute("data-i18n-html"));
     });

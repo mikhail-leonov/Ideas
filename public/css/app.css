@@ -1,14 +1,16 @@
-/* app.css intentionally left minimal.
-   The mind-map UI is built entirely with Bootstrap 5 utility classes.
-   The Cytoscape canvas gets its size from the Bootstrap height chain
-   (body.vh-100 > main.flex-grow-1 > .row.h-100 > .col.h-100 > #cy.h-100),
-   so no explicit pixel height and no custom layout classes are needed here. */
+/* app.css - fixed version
+   Mind-map UI is Bootstrap 5 utilities.
+   Canvas size from Bootstrap height chain: body.vh-100 > main.flex-grow-1 > .row.h-100 > .col.h-100 > #cy.h-100 */
 
 #cy { background: #f8f9fa; }
 .ctx-menu { position: fixed; z-index: 2000; min-width: 240px; }
-#searchResults { z-index: 1050; max-height: 260px; overflow-y: auto; }
+#searchResults { z-index: 1065; max-height: 260px; overflow-y: auto; } /* > modal 1055 */
 .shortcut { color: #6c757d; font-size: .78rem; font-family: ui-monospace, monospace; }
 .dropdown-menu .dropdown-item { display: flex; justify-content: space-between; gap: 1rem; }
+.dropdown-menu .dropdown-item:disabled { pointer-events: none; opacity: .5; }
 
 /* Compact row of edge action buttons in the sidebar. */
 .edge-actions .btn { flex: 1 1 auto; }
+
+/* Small focus ring for keyboard navigation */
+#cy:focus-visible { outline: 2px solid #0d6efd; outline-offset: -2px; }
