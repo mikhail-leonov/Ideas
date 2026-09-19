@@ -5,7 +5,10 @@
    so no explicit pixel height and no custom layout classes are needed here. */
 
 #cy { background: #f8f9fa; }
-.ctx-menu { position: fixed; z-index: 2000; min-width: 220px; }
+.ctx-menu { position: fixed; z-index: 2000; min-width: 240px; }
 #searchResults { z-index: 1050; max-height: 260px; overflow-y: auto; }
 .shortcut { color: #6c757d; font-size: .78rem; font-family: ui-monospace, monospace; }
 .dropdown-menu .dropdown-item { display: flex; justify-content: space-between; gap: 1rem; }
+
+/* Compact row of edge action buttons in the sidebar. */
+.edge-actions .btn { flex: 1 1 auto; }

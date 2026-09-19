@@ -2,20 +2,31 @@
    Depends on: i18n.js + lng/*.js packs (loaded first), Cytoscape, Bootstrap.
    IMPORTANT: the i18n engine lives in public/js/i18n.js only. Do not define
    FT.I18n here — doing so replaces the engine after the language packs have
-   registered into it and every translation is lost. */
+   registered into it and every translation is lost.
+   NOTE: connections are always plain lines (no arrows, no direction).
+   NOTE: attachments are stored as PATH + METADATA ONLY. The JSON never
+   contains file bytes, base64, or dataUrl. The app never reads file content
+   EXCEPT when explicitly asked to load a file into a node description. */
 window.FT = window.FT || {};
 (function (FT) {
 "use strict";
-var LARGE_FILE_BYTES = 2 * 1024 * 1024;
 var cy = null, data = null, dirty = false;
 var selectedNodeId = null, selectedEdgeKey = null;
+var selectedEdge = null;             /* { source, target } of the selected connection */
 var connectMode = false, connectFirstId = null;
-var pendingAttachment = null;
+var reconnectMode = null;            /* { edgeKey, end: "source" | "target" } */
+var dragConnect = null;              /* { sourceId, ghostId } while Ctrl+dragging */
 var els = {};
+var DESC_FILE_MAX_BYTES = 2 * 1024 * 1024; /* 2 MB — cap for description file load */
 
 function newId(prefix) { return (prefix || "node") + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function emptyMap() { return { version: 1, title: FT.I18n.t("app.untitledMap"), rootId: null, nodes: [], connections: [] }; }
 function findNode(id) { return data.nodes.find(function (n) { return n.id === id; }); }
+function findConnection(source, target) {
+  return data.connections.find(function (c) {
+    return (c.source === source && c.target === target) || (c.source === target && c.target === source);
+  });
+}
 function edgeKey(a, b) { return a + "|" + b; }
 function connectionExists(a, b) { return data.connections.some(function (c) { return (c.source === a && c.target === b) || (c.source === b && c.target === a); }); }
 function markDirty() { dirty = true; updateTitleBar(); }
@@ -25,23 +36,31 @@ function updateTitleBar() {
   els.mapTitleDisplay.textContent = data.title + (dirty ? " *" : "");
 }
 
+/* Center of the currently visible viewport, in model coordinates.
+   cy.extent() returns the bounding box of the ELEMENTS, not of what the user
+   is looking at, so it cannot be used for "spawn where I'm looking". */
+function viewportCenter() {
+  var c = cy.container();
+  var w = c ? c.clientWidth  : 0;
+  var h = c ? c.clientHeight : 0;
+  var pan = cy.pan();
+  var z = cy.zoom() || 1;
+  return { x: (w / 2 - pan.x) / z, y: (h / 2 - pan.y) / z };
+}
+
 function nodeLabel(n) {
-  var lines = [n.title || FT.I18n.t("app.newNodeTitle")];
-  var badges = [];
-  if (n.images && n.images.length) badges.push("🖼" + n.images.length);
-  if (n.audio && n.audio.length) badges.push("🎵" + n.audio.length);
-  if (n.video && n.video.length) badges.push("🎬" + n.video.length);
-  if (n.files && n.files.length) badges.push("📎" + n.files.length);
-  if (badges.length) lines.push(badges.join("  "));
-  return lines.join("\n");
+  /* Plain text only — just the node title. No icons, emoji, or badge counts. */
+  return n.title || FT.I18n.t("app.newNodeTitle");
+}
+function edgeElement(c) {
+  /* Connections are always plain lines — no arrow, no direction class. */
+  return { data: { id: edgeKey(c.source, c.target), source: c.source, target: c.target } };
 }
 function toElements() {
   var out = data.nodes.map(function (n) {
     return { data: { id: n.id, label: nodeLabel(n) }, position: { x: n.x || 0, y: n.y || 0 } };
   });
-  data.connections.forEach(function (c) {
-    out.push({ data: { id: edgeKey(c.source, c.target), source: c.source, target: c.target } });
-  });
+  data.connections.forEach(function (c) { out.push(edgeElement(c)); });
   return out;
 }
 function cyStyle() {
@@ -50,16 +69,20 @@ function cyStyle() {
     { selector: "node:selected", style: { "background-color": "#ffc107", "color": "#212529", "border-width": 3, "border-color": "#fd7e14" } },
     { selector: "node.search-highlight", style: { "border-width": 4, "border-color": "#198754" } },
     { selector: "node.connect-candidate", style: { "border-width": 4, "border-color": "#0dcaf0" } },
-    { selector: "edge", style: { "width": 2, "line-color": "#6c757d", "target-arrow-color": "#6c757d", "target-arrow-shape": "triangle", "curve-style": "bezier" } },
-    { selector: "edge:selected", style: { "line-color": "#dc3545", "target-arrow-color": "#dc3545", "width": 3 } }
+    { selector: "node.reconnect-target", style: { "border-width": 4, "border-color": "#d63384" } },
+    { selector: "node.drag-source", style: { "border-width": 4, "border-color": "#0dcaf0" } },
+    { selector: "node.drag-target", style: { "border-width": 4, "border-color": "#198754" } },
+    { selector: "edge", style: { "width": 2, "line-color": "#6c757d", "curve-style": "bezier", "target-arrow-shape": "none", "source-arrow-shape": "none" } },
+    { selector: "edge:selected", style: { "line-color": "#dc3545", "width": 3 } },
+    { selector: "edge.drag-ghost", style: { "line-color": "#0dcaf0", "width": 2, "line-style": "dashed", "events": "no" } }
   ];
 }
 function initCytoscape() {
   cy = window.cytoscape({ container: els.cyContainer, elements: [], style: cyStyle(), wheelSensitivity: 0.25 });
   cy.on("tap", "node", function (evt) { selectNode(evt.target.id()); });
   cy.on("tap", "edge", function (evt) { var e = evt.target; selectEdge(e.data("source"), e.data("target")); });
-  cy.on("tap", function (evt) { if (evt.target === cy) { if (connectMode) return; deselectAll(); } });
-  cy.on("dbltap", "node", function (evt) { selectNode(evt.target.id()); openEditNodeModal(); });
+  cy.on("tap", function (evt) { if (evt.target === cy) { if (connectMode || reconnectMode) return; deselectAll(); } });
+  cy.on("dbltap", "node", function (evt) { selectNode(evt.target.id()); centerOn(evt.target.id()); });
   cy.on("dbltap", function (evt) {
     if (evt.target === cy) {
       var pos = evt.position;
@@ -67,23 +90,89 @@ function initCytoscape() {
       else openAddNodeModal();
     }
   });
-  cy.on("dragfree", "node", function (evt) {
-    var n = findNode(evt.target.id()); if (!n) return;
-    var p = evt.target.position(); n.x = p.x; n.y = p.y; markDirty();
+
+  /* ===== Ctrl + drag from node to node → create connection ===== */
+  cy.on("tapstart", "node", function (evt) {
+    var oe = evt.originalEvent;
+    if (!oe || !(oe.ctrlKey || oe.metaKey)) return;
+    if (connectMode || reconnectMode) return;
+    /* Suppress Cytoscape's own drag-move for this gesture so the source node
+       does not follow the pointer while we are drawing the connection. */
+    evt.target.ungrabify();
+    startDragConnect(evt.target.id());
   });
+
+  cy.on("mousemove", function (evt) {
+    if (!dragConnect) return;
+    var ghost = cy.getElementById(dragConnect.ghostId);
+    if (ghost && ghost.length) ghost.style("target-position", { x: evt.position.x, y: evt.position.y });
+    var hovered = evt.target && evt.target.isNode && evt.target.isNode() ? evt.target : null;
+    cy.nodes().removeClass("drag-target");
+    if (hovered && hovered.id() !== dragConnect.sourceId && hovered.id() !== dragConnect.ghostId) {
+      hovered.addClass("drag-target");
+    }
+  });
+
+  cy.on("tapend", "node", function (evt) {
+    if (!dragConnect) return;
+    finishDragConnect(evt.target.id());
+  });
+
+  cy.on("tapend", function (evt) {
+    /* Release over empty canvas (or anything that is not a node). */
+    if (!dragConnect) return;
+    if (evt.target === cy) finishDragConnect(null);
+  });
+
   cy.on("cxttap", "node", function (evt) { evt.originalEvent.preventDefault(); selectNode(evt.target.id()); showContextMenu(evt.originalEvent, "node", evt.target.id()); });
-  cy.on("cxttap", "edge", function (evt) { evt.originalEvent.preventDefault(); var e = evt.target; selectEdge(e.data("source"), e.data("target")); showContextMenu(evt.originalEvent, "edge", edgeKey(e.data("source"), e.data("target"))); });
+  cy.on("cxttap", "edge", function (evt) {
+    evt.originalEvent.preventDefault();
+    var e = evt.target;
+    selectEdge(e.data("source"), e.data("target"));
+    showContextMenu(evt.originalEvent, "edge", edgeKey(e.data("source"), e.data("target")));
+  });
   cy.on("cxttap", function (evt) {
     if (evt.target === cy) {
       var oe = evt.originalEvent;
       oe.preventDefault();
-      /* The menu is position:fixed, so it must use viewport coordinates.
-         evt.position (model coords) is kept separately for "add node here". */
       showContextMenu({ clientX: oe.clientX, clientY: oe.clientY, _canvasPos: evt.position }, "canvas");
     }
   });
   els.cyContainer.addEventListener("contextmenu", function (e) { e.preventDefault(); });
 }
+
+/* ===== Ctrl + drag connection gesture ===== */
+function startDragConnect(sourceId) {
+  if (!findNode(sourceId)) return;
+  var ghostId = "drag-ghost-" + sourceId;
+  /* Clean any previous ghost defensively. */
+  var old = cy.getElementById(ghostId); if (old && old.length) old.remove();
+  cy.add({
+    data: { id: ghostId, source: sourceId, target: sourceId },
+    classes: "drag-ghost"
+  });
+  dragConnect = { sourceId: sourceId, ghostId: ghostId };
+  cy.getElementById(sourceId).addClass("drag-source");
+}
+function finishDragConnect(targetId) {
+  if (!dragConnect) return;
+  var sourceId = dragConnect.sourceId;
+  cancelDragConnect();
+  if (!targetId || targetId === sourceId) return;
+  addConnection(sourceId, targetId, true);
+  selectNode(sourceId);
+}
+function cancelDragConnect() {
+  if (!dragConnect) return;
+  var ghost = cy.getElementById(dragConnect.ghostId);
+  if (ghost && ghost.length) ghost.remove();
+  cy.nodes().removeClass("drag-source drag-target");
+  /* Restore grabability on the source node. */
+  var src = cy.getElementById(dragConnect.sourceId);
+  if (src && src.length) src.grabify();
+  dragConnect = null;
+}
+
 function rebuildGraph(fit) {
   cy.elements().remove();
   cy.add(toElements());
@@ -106,13 +195,15 @@ function runLayout(markAsDirty) {
 function cssEscape(s) { return String(s).replace(/([ #.;?%&,+*~':"!^$\[\]()=>|\/@])/g, "\\$1"); }
 
 function deselectAll() {
-  selectedNodeId = null; selectedEdgeKey = null;
+  selectedNodeId = null; selectedEdgeKey = null; selectedEdge = null;
   cy.elements().unselect();
   renderSidebarEmpty();
   updateActionButtons();
 }
 function selectNode(id) {
-  selectedEdgeKey = null; selectedNodeId = id;
+  /* Re-connect mode takes priority: clicking a node replaces the chosen endpoint. */
+  if (reconnectMode) { handleReconnectClick(id); return; }
+  selectedEdgeKey = null; selectedEdge = null; selectedNodeId = id;
   cy.elements().unselect();
   var ele = cy.getElementById(id); if (ele && ele.length) ele.select();
   renderSidebarForNode(findNode(id));
@@ -121,6 +212,7 @@ function selectNode(id) {
 }
 function selectEdge(source, target) {
   selectedNodeId = null; selectedEdgeKey = edgeKey(source, target);
+  selectedEdge = { source: source, target: target };
   cy.elements().unselect();
   var ele = cy.getElementById(selectedEdgeKey); if (ele && ele.length) ele.select();
   renderSidebarForEdge(source, target);
@@ -139,17 +231,16 @@ function renderSidebarEmpty() {
 function attachmentSectionHtml(node, kind, labelKey, accept) {
   var items = node[kind] || [];
   var listHtml = items.length ? items.map(function (att, idx) {
-    var meta = '<div class="d-flex align-items-center justify-content-between border rounded p-2 mb-2">';
-    var body = "";
-    if (kind === "images") body = att.dataUrl ? '<img src="' + att.dataUrl + '" class="img-thumbnail me-2" style="width:48px;height:48px;object-fit:cover;">' : '<i class="bi bi-image me-2 fs-4"></i>';
-    else if (kind === "audio" && att.dataUrl) body = '<audio controls src="' + att.dataUrl + '" class="me-2" style="max-width:160px;height:32px;"></audio>';
-    else if (kind === "video" && att.dataUrl) body = '<video controls src="' + att.dataUrl + '" class="me-2" style="max-width:160px;max-height:80px;"></video>';
-    else body = '<i class="bi bi-paperclip me-2 fs-4"></i>';
-    var name = '<div class="small"><div class="text-truncate" style="max-width:140px;" title="' + escapeHtml(att.name) + '">' + escapeHtml(att.name) + '</div><span class="badge text-bg-' + (att.dataUrl ? "success" : "secondary") + '">' + FT.I18n.t(att.dataUrl ? "sidebar.embedded" : "sidebar.metadataOnly") + "</span></div>";
-    var actions = '<div class="ms-2 d-flex flex-column gap-1">';
-    if (att.dataUrl) actions += '<a class="btn btn-sm btn-outline-secondary" download="' + escapeHtml(att.name) + '" href="' + att.dataUrl + '" data-i18n="sidebar.download">' + FT.I18n.t("sidebar.download") + "</a>";
-    actions += '<button type="button" class="btn btn-sm btn-outline-danger" data-remove-att="' + kind + '" data-idx="' + idx + '" data-i18n="sidebar.remove">' + FT.I18n.t("sidebar.remove") + "</button></div>";
-    return meta + '<div class="d-flex align-items-center">' + body + name + "</div>" + actions + "</div>";
+    var pathText = att.path ? escapeHtml(att.path) : "";
+    var metaText = [att.name, att.size ? humanSize(att.size) : "", att.type || ""].filter(Boolean).join(" · ");
+    return '<div class="d-flex align-items-start justify-content-between border rounded p-2 mb-2">' +
+             '<div class="small overflow-hidden me-2">' +
+               '<div class="text-truncate" title="' + escapeHtml(att.name || "") + '">' + escapeHtml(att.name || "(unnamed)") + '</div>' +
+               '<div class="text-truncate text-muted" title="' + pathText + '"><code>' + pathText + '</code></div>' +
+               '<div class="text-muted">' + escapeHtml(metaText) + '</div>' +
+             '</div>' +
+             '<button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" data-remove-att="' + kind + '" data-idx="' + idx + '" data-i18n="sidebar.remove">' + FT.I18n.t("sidebar.remove") + '</button>' +
+           '</div>';
   }).join("") : '<p class="text-muted small" data-i18n="sidebar.noAttachments">' + FT.I18n.t("sidebar.noAttachments") + "</p>";
   return '<div class="mb-3"><h6 class="mb-2" data-i18n="' + labelKey + '">' + FT.I18n.t(labelKey) + "</h6>" + listHtml + '<input type="file" multiple class="form-control form-control-sm" data-add-att="' + kind + '" accept="' + accept + '"></div>';
 }
@@ -176,10 +267,27 @@ function renderSidebarForNode(node) {
 }
 function renderSidebarForEdge(source, target) {
   var s = findNode(source), t = findNode(target);
+
   els.sidebar.innerHTML =
-    '<div class="card"><div class="card-body"><h5 class="card-title" data-i18n="sidebar.edgeSelectedTitle">' + FT.I18n.t("sidebar.edgeSelectedTitle") + "</h5>" +
-    '<p class="mb-1"><strong data-i18n="sidebar.edgeSource">' + FT.I18n.t("sidebar.edgeSource") + "</strong>: " + escapeHtml(s ? s.title : source) + "</p>" +
-    '<p class="mb-0"><strong data-i18n="sidebar.edgeTarget">' + FT.I18n.t("sidebar.edgeTarget") + "</strong>: " + escapeHtml(t ? t.title : target) + "</p></div></div>";
+    '<div class="card"><div class="card-body">' +
+      '<h5 class="card-title" data-i18n="sidebar.edgeSelectedTitle">' + FT.I18n.t("sidebar.edgeSelectedTitle") + "</h5>" +
+      '<p class="mb-1"><strong data-i18n="sidebar.edgeSource">' + FT.I18n.t("sidebar.edgeSource") + "</strong>: " + escapeHtml(s ? s.title : source) + "</p>" +
+      '<p class="mb-1"><strong data-i18n="sidebar.edgeTarget">' + FT.I18n.t("sidebar.edgeTarget") + "</strong>: " + escapeHtml(t ? t.title : target) + "</p>" +
+      '<div class="edge-actions d-flex flex-wrap gap-1 mt-3">' +
+        '<button type="button" class="btn btn-sm btn-outline-danger" data-edge-action="delete" data-i18n="ctx.deleteEdge">' + FT.I18n.t("ctx.deleteEdge") + "</button>" +
+        '<button type="button" class="btn btn-sm btn-outline-info" data-edge-action="reconnectSource" data-i18n="sidebar.reconnectSource">' + FT.I18n.t("sidebar.reconnectSource") + "</button>" +
+        '<button type="button" class="btn btn-sm btn-outline-info" data-edge-action="reconnectTarget" data-i18n="sidebar.reconnectTarget">' + FT.I18n.t("sidebar.reconnectTarget") + "</button>" +
+      "</div>" +
+    "</div></div>";
+
+  els.sidebar.querySelectorAll("[data-edge-action]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var act = btn.getAttribute("data-edge-action");
+      if (act === "delete") requestDeleteConnection();
+      else if (act === "reconnectSource") startReconnect("source");
+      else if (act === "reconnectTarget") startReconnect("target");
+    });
+  });
 }
 function bindSidebarEvents(node) {
   els.sidebar.querySelectorAll("[data-goto-node]").forEach(function (btn) {
@@ -205,33 +313,37 @@ function centerOn(id) {
 }
 function refreshNodeVisual(node) { var ele = cy.getElementById(node.id); if (ele && ele.length) ele.data("label", nodeLabel(node)); }
 function escapeHtml(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
-function humanSize(bytes) { if (bytes < 1024) return bytes + " B"; if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB"; return (bytes / (1024 * 1024)).toFixed(1) + " MB"; }
+function humanSize(bytes) { if (!bytes) return ""; if (bytes < 1024) return bytes + " B"; if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB"; return (bytes / (1024 * 1024)).toFixed(1) + " MB"; }
 
-/* ===== Attachments ===== */
+/* ===== Attachments =====
+   Files are NEVER read or embedded. Only the file name, MIME type, size, and
+   the full path the user supplies are stored in the JSON. The bytes stay on
+   disk and are the user's responsibility to manage. */
 function handleAttachmentFiles(node, kind, fileList) {
   var files = Array.prototype.slice.call(fileList || []);
-  return files.reduce(function (chain, file) { return chain.then(function () { return addOneAttachment(node, kind, file); }); }, Promise.resolve());
-}
-function addOneAttachment(node, kind, file) {
-  return decideEmbedding(file).then(function (embed) {
-    var meta = { name: file.name, type: file.type, size: file.size };
-    if (!embed) { node[kind].push(meta); return; }
-    return new Promise(function (resolve) {
-      var reader = new FileReader();
-      reader.onload = function () { meta.dataUrl = reader.result; node[kind].push(meta); resolve(); };
-      reader.onerror = function () { node[kind].push(meta); resolve(); };
-      reader.readAsDataURL(file);
+  return files.reduce(function (chain, file) {
+    return chain.then(function () {
+      return new Promise(function (resolve) {
+        /* Browsers do not expose the real filesystem path, so we ask the user
+           for it. Cancel → the file is not attached at all. Empty input is
+           also treated as cancel so the JSON never contains a bare name. */
+        var entered = window.prompt(
+          FT.I18n.t("prompt.attachmentPath", { name: file.name }),
+          ""
+        );
+        if (entered == null) { resolve(); return; }
+        var trimmed = entered.trim();
+        if (!trimmed) { resolve(); return; }
+        node[kind].push({
+          name: file.name,
+          type: file.type || "",
+          size: file.size || 0,
+          path: trimmed
+        });
+        resolve();
+      });
     });
-  });
-}
-function decideEmbedding(file) {
-  if (file.size < LARGE_FILE_BYTES) return Promise.resolve(true);
-  return new Promise(function (resolve) {
-    els.largeAttName.textContent = file.name;
-    els.largeAttBody.textContent = FT.I18n.t("modal.largeAttachmentBody", { name: file.name, size: humanSize(file.size) });
-    pendingAttachment = { resolve: resolve };
-    els.largeAttModal.show();
-  });
+  }, Promise.resolve());
 }
 
 /* ===== Node CRUD ===== */
@@ -242,6 +354,7 @@ function _openAddNodeModal() {
   nodeModalMode = "add"; nodeModalTargetId = null;
   els.nodeModalLabel.textContent = FT.I18n.t("modal.addNodeTitle");
   els.nodeTitleInput.value = ""; els.nodeDescInput.value = "";
+  if (els.descFileStatus) els.descFileStatus.textContent = "";
   els.connectToSelectedWrap.classList.toggle("d-none", !selectedNodeId);
   els.connectToSelectedInput.checked = !!selectedNodeId;
   els.nodeModal.show();
@@ -253,9 +366,30 @@ function openEditNodeModal() {
   nodeModalMode = "edit"; nodeModalTargetId = n.id;
   els.nodeModalLabel.textContent = FT.I18n.t("modal.editNodeTitle");
   els.nodeTitleInput.value = n.title || ""; els.nodeDescInput.value = n.description || "";
+  if (els.descFileStatus) els.descFileStatus.textContent = "";
   els.connectToSelectedWrap.classList.add("d-none");
   els.nodeModal.show();
   setTimeout(function () { els.nodeTitleInput.focus(); }, 200);
+}
+/* Read a user-picked file as UTF-8 text and put it into the description
+   textarea. Nothing is stored on the node — the text becomes the description
+   when the modal is saved. Size is capped to avoid freezing the UI. */
+function readFileIntoDescription(file) {
+  if (!file) return;
+  if (file.size > DESC_FILE_MAX_BYTES) {
+    if (els.descFileStatus) els.descFileStatus.textContent = FT.I18n.t("modal.fileTooLarge");
+    return;
+  }
+  var reader = new FileReader();
+  if (els.descFileStatus) els.descFileStatus.textContent = FT.I18n.t("modal.readingFile");
+  reader.onload = function () {
+    els.nodeDescInput.value = typeof reader.result === "string" ? reader.result : "";
+    if (els.descFileStatus) els.descFileStatus.textContent = FT.I18n.t("modal.fileLoaded", { name: file.name });
+  };
+  reader.onerror = function () {
+    if (els.descFileStatus) els.descFileStatus.textContent = FT.I18n.t("modal.fileReadError");
+  };
+  reader.readAsText(file);
 }
 function submitNodeModal() {
   var title = els.nodeTitleInput.value.trim() || FT.I18n.t("app.newNodeTitle");
@@ -270,8 +404,15 @@ function submitNodeModal() {
     var pos = pendingAddPosition || { x: 0, y: 0 };
     if (!pendingAddPosition) {
       var ele = prevSelected ? cy.getElementById(prevSelected) : null;
-      if (ele && ele.length) { var p = ele.position(); pos = { x: p.x + 120, y: p.y + 60 }; }
-      else if (cy.nodes().length) { var ext = cy.extent(); pos = { x: (ext.x1 + ext.x2) / 2, y: (ext.y1 + ext.y2) / 2 }; }
+      if (ele && ele.length) {
+        var p = ele.position();
+        pos = { x: p.x + 120, y: p.y + 60 };
+      } else {
+        /* Place the new node at the center of the currently visible viewport,
+           not at the model-coordinate bounding box of the elements (which
+           ignored panning/zooming and put new nodes near the top-left). */
+        pos = viewportCenter();
+      }
     }
     var newNode = { id: id, title: title, description: desc, x: pos.x, y: pos.y, images: [], audio: [], video: [], files: [] };
     data.nodes.push(newNode);
@@ -287,6 +428,7 @@ function submitNodeModal() {
 function requestDeleteNode() { if (!selectedNodeId) return; els.deleteNodeModal.show(); }
 function confirmDeleteNode() {
   var id = selectedNodeId; if (!id) { els.deleteNodeModal.hide(); return; }
+  cancelReconnect();
   data.nodes = data.nodes.filter(function (n) { return n.id !== id; });
   data.connections = data.connections.filter(function (c) { return c.source !== id && c.target !== id; });
   if (data.rootId === id) data.rootId = data.nodes.length ? data.nodes[0].id : null;
@@ -296,6 +438,7 @@ function confirmDeleteNode() {
 
 /* ===== Connect mode ===== */
 function toggleConnectMode() {
+  cancelReconnect();
   connectMode = !connectMode; connectFirstId = null;
   cy.nodes().removeClass("connect-candidate");
   els.connectModeBanner.classList.toggle("d-none", !connectMode);
@@ -304,7 +447,7 @@ function toggleConnectMode() {
 function cancelConnectMode() {
   connectMode = false; connectFirstId = null;
   cy.nodes().removeClass("connect-candidate");
-  els.connectModeBanner.classList.add("d-none");
+  if (!reconnectMode) els.connectModeBanner.classList.add("d-none");
 }
 function handleConnectClick(id) {
   if (!connectFirstId) {
@@ -322,15 +465,71 @@ function handleConnectClick(id) {
 function addConnection(source, target, showWarnings) {
   if (source === target) { if (showWarnings) showAlert("warning", FT.I18n.t("connect.selfNotAllowed")); return false; }
   if (connectionExists(source, target)) { if (showWarnings) showAlert("warning", FT.I18n.t("connect.duplicate")); return false; }
-  data.connections.push({ source: source, target: target });
-  cy.add({ data: { id: edgeKey(source, target), source: source, target: target } });
+  var conn = { source: source, target: target };
+  data.connections.push(conn);
+  cy.add(edgeElement(conn));
   markDirty(); return true;
 }
 function requestDeleteConnection() {
   if (!selectedEdgeKey) return;
   data.connections = data.connections.filter(function (c) { return edgeKey(c.source, c.target) !== selectedEdgeKey; });
   cy.getElementById(selectedEdgeKey).remove();
-  selectedEdgeKey = null; renderSidebarEmpty(); updateActionButtons(); markDirty();
+  selectedEdgeKey = null; selectedEdge = null;
+  renderSidebarEmpty(); updateActionButtons(); markDirty();
+}
+
+/* ===== Re-connect (mouse-only connection editing) ===== */
+function startReconnect(end) {
+  if (!selectedEdgeKey || !selectedEdge) return;
+  cancelConnectMode();
+  reconnectMode = { edgeKey: selectedEdgeKey, end: end };
+  cy.nodes().addClass("reconnect-target");
+  els.connectModeBanner.classList.remove("d-none");
+  els.connectModeBanner.textContent = FT.I18n.t(end === "source" ? "connect.reconnectSource" : "connect.reconnectTarget");
+}
+function cancelReconnect() {
+  if (!reconnectMode) return;
+  reconnectMode = null;
+  cy.nodes().removeClass("reconnect-target");
+  if (connectMode) {
+    els.connectModeBanner.textContent = FT.I18n.t(connectFirstId ? "connect.bannerSelectSecond" : "connect.bannerSelectFirst");
+  } else {
+    els.connectModeBanner.classList.add("d-none");
+  }
+}
+function handleReconnectClick(newNodeId) {
+  if (!reconnectMode) return;
+  var edge = data.connections.find(function (c) { return edgeKey(c.source, c.target) === reconnectMode.edgeKey; });
+  if (!edge) { cancelReconnect(); return; }
+  var end = reconnectMode.end;
+  var otherEnd = end === "source" ? edge.target : edge.source;
+  if (newNodeId === otherEnd) { showAlert("warning", FT.I18n.t("connect.reconnectSameNode")); return; }
+
+  /* Duplicate check — allow it only if it maps back onto the same edge. */
+  var same = (edgeKey(newNodeId, otherEnd) === edgeKey(edge.source, edge.target)) ||
+             (edgeKey(otherEnd, newNodeId) === edgeKey(edge.source, edge.target));
+  if (!same && connectionExists(newNodeId, otherEnd)) {
+    showAlert("warning", FT.I18n.t("connect.duplicate"));
+    return;
+  }
+
+  var oldKey = edgeKey(edge.source, edge.target);
+  var oldEle = cy.getElementById(oldKey);
+  if (oldEle && oldEle.length) oldEle.remove();
+
+  if (end === "source") edge.source = newNodeId; else edge.target = newNodeId;
+
+  var newKey = edgeKey(edge.source, edge.target);
+  cy.add(edgeElement(edge));
+  cancelReconnect();
+
+  selectedEdgeKey = newKey;
+  selectedEdge = { source: edge.source, target: edge.target };
+  cy.elements().unselect();
+  var ne = cy.getElementById(newKey);
+  if (ne && ne.length) ne.select();
+  renderSidebarForEdge(edge.source, edge.target);
+  markDirty();
 }
 
 /* ===== Context menu ===== */
@@ -343,13 +542,25 @@ function showContextMenu(evt, kind, target) {
     items.push({ label: FT.I18n.t("ctx.deleteNode"), action: "deleteNode", shortcut: "Del", danger: true });
     items.push({ divider: true });
     items.push({ label: FT.I18n.t("ctx.connectFrom"), action: "connectFromHere" });
+    items.push({ label: FT.I18n.t("ctx.centerNode"), action: "centerNode" });
   } else if (kind === "edge") {
     items.push({ label: FT.I18n.t("ctx.deleteEdge"), action: "deleteEdge", shortcut: "Del", danger: true });
+    items.push({ divider: true });
+    items.push({ label: FT.I18n.t("ctx.reconnectSource"), action: "reconnectSource" });
+    items.push({ label: FT.I18n.t("ctx.reconnectTarget"), action: "reconnectTarget" });
   } else {
     items.push({ label: FT.I18n.t("ctx.addNode"), action: "addNodeHere", shortcut: "N" });
     items.push({ divider: true });
     items.push({ label: FT.I18n.t("ctx.fitMap"), action: "fitMap", shortcut: "F" });
     items.push({ label: FT.I18n.t("ctx.autoLayout"), action: "autoLayout", shortcut: "L" });
+    items.push({ label: FT.I18n.t("ctx.focusSearch"), action: "focusSearch" });
+    items.push({ divider: true });
+    items.push({ label: FT.I18n.t("ctx.editMapTitle"), action: "editMapTitle" });
+    items.push({ label: FT.I18n.t("ctx.saveMap"), action: "saveMap" });
+    items.push({ label: FT.I18n.t("ctx.openMap"), action: "openMap" });
+    items.push({ label: FT.I18n.t("ctx.newMap"), action: "newMap", danger: true });
+    items.push({ divider: true });
+    items.push({ label: FT.I18n.t("ctx.showHelp"), action: "showHelp" });
   }
   items.forEach(function (it) {
     if (it.divider) { var d = document.createElement("li"); d.innerHTML = '<hr class="dropdown-divider">'; els.ctxMenu.appendChild(d); return; }
@@ -363,9 +574,18 @@ function showContextMenu(evt, kind, target) {
       else if (it.action === "deleteNode") requestDeleteNode();
       else if (it.action === "deleteEdge") requestDeleteConnection();
       else if (it.action === "connectFromHere") { if (!connectMode) toggleConnectMode(); handleConnectClick(target); }
+      else if (it.action === "centerNode") { selectNode(target); centerOn(target); }
+      else if (it.action === "reconnectSource") startReconnect("source");
+      else if (it.action === "reconnectTarget") startReconnect("target");
       else if (it.action === "addNodeHere") { if (evt._canvasPos) openAddNodeModalAt(evt._canvasPos.x, evt._canvasPos.y); else openAddNodeModal(); }
       else if (it.action === "fitMap") cy.fit(undefined, 40);
       else if (it.action === "autoLayout") { runLayout(true); cy.fit(undefined, 40); }
+      else if (it.action === "focusSearch") els.searchInput.focus();
+      else if (it.action === "editMapTitle") openMapTitleEdit();
+      else if (it.action === "saveMap") saveJson();
+      else if (it.action === "openMap") els.fileInputJson.click();
+      else if (it.action === "newMap") requestNewMap();
+      else if (it.action === "showHelp") showHelp();
     });
     li.appendChild(btn); els.ctxMenu.appendChild(li);
   });
@@ -382,7 +602,7 @@ function showContextMenu(evt, kind, target) {
 /* ===== New / Open / Save ===== */
 function requestNewMap() { if (dirty) { els.newMapModal.show(); return; } doNewMap(); }
 function doNewMap() {
-  data = emptyMap(); cancelConnectMode(); deselectAll(); rebuildGraph(true); clearDirty();
+  data = emptyMap(); cancelConnectMode(); cancelReconnect(); cancelDragConnect(); deselectAll(); rebuildGraph(true); clearDirty();
   els.newMapModal.hide(); showAlert("success", FT.I18n.t("alert.mapCreated"));
 }
 function openJsonFile(file) {
@@ -392,12 +612,26 @@ function openJsonFile(file) {
     try { parsed = JSON.parse(reader.result); } catch (e) { showAlert("danger", FT.I18n.t("alert.invalidJson")); return; }
     var result = normalizeMap(parsed);
     if (!result.ok) { showAlert("danger", FT.I18n.t("alert.invalidStructure")); return; }
-    data = result.map; cancelConnectMode(); rebuildGraph(true); clearDirty();
+    data = result.map; cancelConnectMode(); cancelReconnect(); cancelDragConnect(); rebuildGraph(true); clearDirty();
     result.notices.forEach(function (msg) { showAlert("warning", msg); });
     showAlert("success", FT.I18n.t("alert.mapOpened"));
   };
   reader.onerror = function () { showAlert("danger", FT.I18n.t("alert.invalidJson")); };
   reader.readAsText(file);
+}
+/* Keep only path + lightweight metadata. Any legacy `dataUrl` field from
+   older maps is dropped so the exported JSON never contains file bytes. */
+function sanitizeAttachments(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map(function (a) {
+    if (!a || typeof a !== "object") return null;
+    return {
+      name: typeof a.name === "string" ? a.name : "",
+      type: typeof a.type === "string" ? a.type : "",
+      size: typeof a.size === "number" ? a.size : 0,
+      path: typeof a.path === "string" ? a.path : (typeof a.name === "string" ? a.name : "")
+    };
+  }).filter(Boolean);
 }
 function normalizeMap(raw) {
   var notices = [];
@@ -410,7 +644,17 @@ function normalizeMap(raw) {
     if (!id) { id = newId("node"); missingIdCount++; }
     if (seenIds[id]) { id = newId("node"); dupIdCount++; }
     seenIds[id] = true;
-    map.nodes.push({ id: id, title: typeof n.title === "string" ? n.title : "", description: typeof n.description === "string" ? n.description : "", x: typeof n.x === "number" ? n.x : 0, y: typeof n.y === "number" ? n.y : 0, images: Array.isArray(n.images) ? n.images : [], audio: Array.isArray(n.audio) ? n.audio : [], video: Array.isArray(n.video) ? n.video : [], files: Array.isArray(n.files) ? n.files : [] });
+    map.nodes.push({
+      id: id,
+      title: typeof n.title === "string" ? n.title : "",
+      description: typeof n.description === "string" ? n.description : "",
+      x: typeof n.x === "number" ? n.x : 0,
+      y: typeof n.y === "number" ? n.y : 0,
+      images: sanitizeAttachments(n.images),
+      audio:  sanitizeAttachments(n.audio),
+      video:  sanitizeAttachments(n.video),
+      files:  sanitizeAttachments(n.files)
+    });
   });
   var validIds = {}; map.nodes.forEach(function (n) { validIds[n.id] = true; });
   var invalidConnCount = 0, seenConn = {};
@@ -418,7 +662,9 @@ function normalizeMap(raw) {
     if (!c || !validIds[c.source] || !validIds[c.target]) { invalidConnCount++; return; }
     var key = edgeKey(c.source, c.target), revKey = edgeKey(c.target, c.source);
     if (seenConn[key] || seenConn[revKey]) return;
-    seenConn[key] = true; map.connections.push({ source: c.source, target: c.target });
+    seenConn[key] = true;
+    /* Direction is ignored — connections are always plain lines. */
+    map.connections.push({ source: c.source, target: c.target });
   });
   if (!map.rootId || !validIds[map.rootId]) map.rootId = map.nodes.length ? map.nodes[0].id : null;
   if (missingIdCount) notices.push(FT.I18n.t("alert.missingIdsGenerated", { count: missingIdCount }));
@@ -482,7 +728,12 @@ function showHelp() { els.helpModal.show(); }
 function isTypingTarget(el) { return el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable); }
 function bindShortcuts() {
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") { if (connectMode) { cancelConnectMode(); return; } hideContextMenu(); }
+    if (e.key === "Escape") {
+      if (dragConnect) { cancelDragConnect(); return; }
+      if (reconnectMode) { cancelReconnect(); return; }
+      if (connectMode) { cancelConnectMode(); return; }
+      hideContextMenu();
+    }
     var typing = isTypingTarget(document.activeElement);
     if (typing && e.key !== "Escape") return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); saveJson(); return; }
@@ -555,6 +806,9 @@ function cacheEls() {
   els.connectToSelectedWrap = document.getElementById("connectToSelectedWrap");
   els.connectToSelectedInput = document.getElementById("connectToSelectedInput");
   els.btnNodeModalSave = document.getElementById("btnNodeModalSave");
+  els.btnLoadDescFromFile = document.getElementById("btnLoadDescFromFile");
+  els.descFileStatus = document.getElementById("descFileStatus");
+  els.fileInputDesc = document.getElementById("fileInputDesc");
   els.nodeModal = new bootstrap.Modal(document.getElementById("nodeModal"));
   els.deleteNodeModal = new bootstrap.Modal(document.getElementById("deleteNodeModal"));
   els.btnConfirmDeleteNode = document.getElementById("btnConfirmDeleteNode");
@@ -563,11 +817,6 @@ function cacheEls() {
   els.mapTitleModal = new bootstrap.Modal(document.getElementById("mapTitleModal"));
   els.mapTitleInput = document.getElementById("mapTitleInput");
   els.btnSaveMapTitle = document.getElementById("btnSaveMapTitle");
-  els.largeAttModal = new bootstrap.Modal(document.getElementById("largeAttModal"));
-  els.largeAttName = document.getElementById("largeAttName");
-  els.largeAttBody = document.getElementById("largeAttBody");
-  els.btnEmbedLarge = document.getElementById("btnEmbedLarge");
-  els.btnMetadataOnlyLarge = document.getElementById("btnMetadataOnlyLarge");
   /* Cached once — creating a Modal on every show() leaks instances/listeners. */
   els.helpModal = new bootstrap.Modal(document.getElementById("helpModal"));
 }
@@ -578,24 +827,21 @@ function bindEvents() {
     els.fileInputJson.value = "";
   });
   els.btnNodeModalSave.addEventListener("click", submitNodeModal);
+  els.btnLoadDescFromFile.addEventListener("click", function () { els.fileInputDesc.click(); });
+  els.fileInputDesc.addEventListener("change", function () {
+    if (els.fileInputDesc.files && els.fileInputDesc.files[0]) readFileIntoDescription(els.fileInputDesc.files[0]);
+    els.fileInputDesc.value = "";
+  });
   els.btnConfirmDeleteNode.addEventListener("click", confirmDeleteNode);
   els.btnSaveMapTitle.addEventListener("click", submitMapTitle);
   els.searchInput.addEventListener("input", function () { runSearch(els.searchInput.value); });
-  els.btnEmbedLarge.addEventListener("click", function () {
-    els.largeAttModal.hide();
-    if (pendingAttachment) { pendingAttachment.resolve(true); pendingAttachment = null; }
-  });
-  els.btnMetadataOnlyLarge.addEventListener("click", function () {
-    els.largeAttModal.hide();
-    if (pendingAttachment) { pendingAttachment.resolve(false); pendingAttachment = null; }
-  });
-  document.getElementById("largeAttModal").addEventListener("hidden.bs.modal", function () {
-    if (pendingAttachment) { pendingAttachment.resolve(false); pendingAttachment = null; }
-  });
   document.addEventListener("click", function (e) {
     if (!els.ctxMenu.contains(e.target)) hideContextMenu();
   });
   window.addEventListener("resize", function () { if (cy) cy.resize(); });
+  /* If the user releases the mouse outside the canvas (or Alt-Tabs away)
+     while Ctrl-dragging, the tapend never fires — clean up here. */
+  window.addEventListener("blur", function () { cancelDragConnect(); });
   /* Warn before leaving with unsaved changes. */
   window.addEventListener("beforeunload", function (e) {
     if (!dirty) return;
@@ -621,9 +867,11 @@ function init() {
   buildLangMenu();
   FT.I18n.onChange(function () {
     if (selectedNodeId) renderSidebarForNode(findNode(selectedNodeId));
-    else if (!selectedEdgeKey) renderSidebarEmpty();
+    else if (selectedEdge) renderSidebarForEdge(selectedEdge.source, selectedEdge.target);
+    else renderSidebarEmpty();
     updateTitleBar();
-    if (connectMode) els.connectModeBanner.textContent = FT.I18n.t(connectFirstId ? "connect.bannerSelectSecond" : "connect.bannerSelectFirst");
+    if (reconnectMode) els.connectModeBanner.textContent = FT.I18n.t(reconnectMode.end === "source" ? "connect.reconnectSource" : "connect.reconnectTarget");
+    else if (connectMode) els.connectModeBanner.textContent = FT.I18n.t(connectFirstId ? "connect.bannerSelectSecond" : "connect.bannerSelectFirst");
   });
   initCytoscape();
   bindEvents();

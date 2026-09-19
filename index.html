@@ -108,6 +108,10 @@
         <div class="mb-3">
           <label class="form-label" for="nodeDescInput" data-i18n="modal.descriptionLabel">Description</label>
           <textarea id="nodeDescInput" class="form-control" rows="3"></textarea>
+          <div class="d-flex align-items-center gap-2 mt-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnLoadDescFromFile" data-i18n="modal.loadFromFile">Load from file…</button>
+            <small id="descFileStatus" class="text-muted"></small>
+          </div>
         </div>
         <div class="form-check d-none" id="connectToSelectedWrap">
           <input class="form-check-input" type="checkbox" id="connectToSelectedInput" checked>
@@ -180,26 +184,6 @@
   </div>
 </div>
 
-<!-- Large attachment warning -->
-<div class="modal fade" id="largeAttModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" data-i18n="modal.largeAttachmentTitle">Large attachment</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <p class="fw-semibold mb-1" id="largeAttName"></p>
-        <p class="mb-0" id="largeAttBody"></p>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" id="btnMetadataOnlyLarge" data-i18n="modal.metadataOnlyBtn">Keep metadata only</button>
-        <button type="button" class="btn btn-primary" id="btnEmbedLarge" data-i18n="modal.embed">Embed file anyway</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- Help modal -->
 <div class="modal fade" id="helpModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
@@ -214,9 +198,10 @@
           <tbody>
             <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.click">Click</kbd></td><td data-i18n="help.mouse.clickDesc">Select a node or connection</td></tr>
             <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.dblClick">Double-click canvas</kbd></td><td data-i18n="help.mouse.dblClickDesc">Add a new node</td></tr>
-            <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.dblClickNode">Double-click node</kbd></td><td data-i18n="help.mouse.dblClickNodeDesc">Edit the node</td></tr>
-            <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.rightClick">Right-click</kbd></td><td data-i18n="help.mouse.rightClickDesc">Open context menu</td></tr>
+            <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.dblClickNode">Double-click node</kbd></td><td data-i18n="help.mouse.dblClickNodeDesc">Center / zoom to the node</td></tr>
+            <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.rightClick">Right-click</kbd></td><td data-i18n="help.mouse.rightClickDesc">Open context menu (node, edge, canvas)</td></tr>
             <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.drag">Drag node</kbd></td><td data-i18n="help.mouse.dragDesc">Move a node</td></tr>
+            <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.ctrlDrag">Ctrl + drag node</kbd></td><td data-i18n="help.mouse.ctrlDragDesc">Drop onto another node to connect them</td></tr>
             <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.wheel">Mouse wheel</kbd></td><td data-i18n="help.mouse.wheelDesc">Zoom in / out</td></tr>
             <tr><td class="text-nowrap"><kbd data-i18n="help.mouse.dragCanvas">Drag canvas</kbd></td><td data-i18n="help.mouse.dragCanvasDesc">Pan the view</td></tr>
           </tbody>
@@ -232,7 +217,7 @@
             <tr><td class="text-nowrap"><kbd>E</kbd></td><td data-i18n="help.keys.editNode">Edit selected node</td></tr>
             <tr><td class="text-nowrap"><kbd>Del</kbd></td><td data-i18n="help.keys.delete">Delete selected node / connection</td></tr>
             <tr><td class="text-nowrap"><kbd>C</kbd></td><td data-i18n="help.keys.connect">Toggle connect mode</td></tr>
-            <tr><td class="text-nowrap"><kbd>Esc</kbd></td><td data-i18n="help.keys.cancel">Cancel connect mode / close menus</td></tr>
+            <tr><td class="text-nowrap"><kbd>Esc</kbd></td><td data-i18n="help.keys.cancel">Cancel connect / re-connect / drag-connect / close menus</td></tr>
             <tr><td class="text-nowrap"><kbd>F</kbd></td><td data-i18n="help.keys.fit">Fit map to view</td></tr>
             <tr><td class="text-nowrap"><kbd>+</kbd> / <kbd>−</kbd></td><td data-i18n="help.keys.zoom">Zoom in / out</td></tr>
             <tr><td class="text-nowrap"><kbd>L</kbd></td><td data-i18n="help.keys.layout">Automatic layout</td></tr>
@@ -244,10 +229,10 @@
 
         <h6 data-i18n="help.tipsTitle">Tips</h6>
         <ul class="mb-0">
-          <li data-i18n-html="help.tip1">Use <b>Connect mode</b> (press <kbd>C</kbd>) then click two nodes to link them.</li>
-          <li data-i18n-html="help.tip2">Drag nodes freely — positions are saved with the JSON file.</li>
-          <li data-i18n-html="help.tip3">Right-click a node or connection for quick actions.</li>
-          <li data-i18n-html="help.tip4">Attachments (images, audio, video, files) are managed from the sidebar.</li>
+          <li data-i18n-html="help.tip1">Use <b>Connect mode</b> (press <kbd>C</kbd>) then click two nodes to link them, or <b>Ctrl + drag</b> from one node straight onto another.</li>
+          <li data-i18n-html="help.tip2">Right-click a connection to delete it or re-connect either end to a different node.</li>
+          <li data-i18n-html="help.tip3">Right-click a node, a connection, or empty canvas to reach <b>every</b> action with the mouse alone.</li>
+          <li data-i18n-html="help.tip4">Attachments are stored as <b>paths only</b> — the JSON never contains file bytes.</li>
         </ul>
       </div>
       <div class="modal-footer">
@@ -259,6 +244,7 @@
 
 <div id="alertContainer" class="toast-container position-fixed bottom-0 end-0 p-3 d-flex flex-column gap-2"></div>
 <input type="file" id="fileInputJson" accept="application/json,.json" class="d-none">
+<input type="file" id="fileInputDesc" class="d-none">
 
         <script src="https://unpkg.com/cytoscape@3.30.1/dist/cytoscape.min.js"></script>
         <script src="public/js/bootstrap/bootstrap.bundle.min.js"></script>
